@@ -177,11 +177,11 @@ tmp/
 log/
 
 #
-!/java/*.jar
+!**/java/*.jar
 
 # docs
-/docs/*.pdf
-/docs/*.log
-/docs/*.out
-/docs/*.gz
-/docs/*.aux
+**/docs/*.pdf
+**/docs/*.log
+**/docs/*.out
+**/docs/*.gz
+**/docs/*.aux
