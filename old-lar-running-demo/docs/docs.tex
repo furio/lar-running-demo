@@ -1,0 +1,228 @@
+%% Based on a TeXnicCenter-Template by Tino Weinkauf.
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% HEADER
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\documentclass[a4paper,twoside,10pt]{report}
+% Alternative Options:
+%	Paper Size: a4paper / a5paper / b5paper / letterpaper / legalpaper / executivepaper
+% Duplex: oneside / twoside
+% Base Font Size: 10pt / 11pt / 12pt
+
+
+%% Language %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\usepackage[british]{babel} %francais, polish, spanish, ...
+\usepackage[T1]{fontenc}
+\usepackage[ansinew]{inputenc}
+\usepackage[plainpages=false]{hyperref}	% generazione di collegamenti ipertestuali su indice e riferimenti
+\usepackage[all]{hypcap} % per far si che i link ipertestuali alle immagini puntino all'inizio delle stesse e non alla didascalia 
+\usepackage{lmodern} %Type1-font for non-english texts and characters
+
+
+%% Packages for Graphics & Figures %%%%%%%%%%%%%%%%%%%%%%%%%%
+\usepackage{graphicx} %%For loading graphic files
+%\usepackage{subfig} %%Subfigures inside a figure
+%\usepackage{tikz} %%Generate vector graphics from within LaTeX
+
+%% Please note:
+%% Images can be included using \includegraphics{filename}
+%% resp. using the dialog in the Insert menu.
+%% 
+%% The mode "LaTeX => PDF" allows the following formats:
+%%   .jpg  .png  .pdf  .mps
+%% 
+%% The modes "LaTeX => DVI", "LaTeX => PS" und "LaTeX => PS => PDF"
+%% allow the following formats:
+%%   .eps  .ps  .bmp  .pict  .pntg
+
+
+%% Math Packages %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\usepackage{amsmath}
+\usepackage{amsthm}
+\usepackage{amsfonts}
+%
+\usepackage{xcolor}
+\definecolor{whitesmoke}{HTML}{F5F5F5}
+%
+\usepackage{listings}
+\lstdefinestyle{bash-style}{
+  captionpos=b,
+  belowcaptionskip=1\baselineskip,
+  breaklines=true,
+  tabsize=2,
+  frame=tb,
+  aboveskip=3mm,
+  belowskip=3mm,
+  xleftmargin=\parindent,
+  language=bash,
+  showstringspaces=false,
+  % basicstyle=\tiny, %\footnotesize\ttfamily,
+  basicstyle={\fontsize{8pt}{8pt}\ttfamily},
+  keywordstyle=\color{blue},
+  commentstyle=\color{green!40!black},
+  stringstyle=\color{brown},
+  %identifierstyle=\color{blue},
+  backgroundcolor=\color{whitesmoke}
+}
+
+%% Line Spacing %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%\usepackage{setspace}
+%\singlespacing        %% 1-spacing (default)
+%\onehalfspacing       %% 1,5-spacing
+%\doublespacing        %% 2-spacing
+
+
+%% Other Packages %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%\usepackage{a4wide} %%Smaller margins = more text per page.
+%\usepackage{fancyhdr} %%Fancy headings
+%\usepackage{longtable} %%For tables, that exceed one page
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% DOCUMENT
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{document}
+
+\pagestyle{empty} %No headings for the first pages.
+
+
+%% Title Page %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% ==> Write your text here or include other files.
+
+%% The simple version:
+\title{Lar Running Demo}
+\author{Francesco Furiani}
+%\date{} %%If commented, the current date is used.
+\maketitle
+
+%% Inhaltsverzeichnis %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\tableofcontents %Table of contents
+\cleardoublepage %The first chapter should start on an odd page.
+
+\pagestyle{plain} %Now display headings: headings / fancy / ...
+
+
+
+%% Chapters %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% ==> Write your text here or include other files.
+
+%\input{intro} %You need a file 'intro.tex' for this.
+This document contains the documentation for the software <<lar-running-demo>> (LRD). 
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% ==> Some hints are following:
+
+\chapter{Purpose}\label{purpose}
+
+LRD is a software that enables automatic model extraction from a set of medical images (like MRI). Such feature is achieved through a process in which a user gives input and other parameters to start the computation.
+
+The whole software is based on the mathematical LAR framework\cite{dicarlo2013linear} and the OpenCL based framework "HPC LAR"\cite{Furiani2013}.
+
+\chapter{Prerequisites}\label{prerequisites}
+
+Although the system checks for needed prerequisites, they're listed here for easy of use.
+
+\begin{itemize}
+\item *NIX compatible operating system
+\item Bash
+\item Pyhton (at least 2.7)
+\item Java (at least 1.7) \footnotemark[1]
+\item OpenCL libraries with a compatible device \footnotemark[1]
+\end{itemize}
+\footnotetext[1]{These are not mandatory, but if present will speed-up the computation process.}
+
+\section{Pyhton modules}
+The system is mostly wrote in Python and some modules are necessary for its execution. They can installed through your installer of choice, for example \texttt{easy\_install} or \texttt{pip}, or they might be already part of your Python distribution. Only one, requires manual installation.
+
+\begin{enumerate}
+\item NumPy
+\item SciPy
+\item Cython
+\item Simplejson (or Json)
+\item Requests
+\item Termcolor
+\item Png
+\item Matplotlib
+\item Logging
+\item Multiproccessing
+\item PyPlasm (\url{https://github.com/plasm-language/pyplasm})
+\end{enumerate}
+
+\section{OpenCL}
+Using OpenCL requires installation of proper platform accelerated drivers and libraries. Check the documentation of your vendor to do so.
+
+\section{Java}
+A standard Java installation is needed to us OpenCL. Setting \texttt{\$JAVA\_HOME} is mandatory to ensue correct execution, especially on NVIDIA platforms.
+
+\chapter{Using}\label{using}
+The program consists of 3 bash scripts that can be used from a *NIX compatible shell:
+\begin{itemize}
+	\item \texttt{startConversion.sh}
+	\item \texttt{startConversion-singleColor.sh}
+	\item \texttt{visualize.sh}
+\end{itemize}
+
+Every script contains a \texttt{-h} option that can be used to discover the relevant options for each script as in \ref{lst:help-example}
+
+\begin{lstlisting}[style=bash-style,label=lst:help-example]
+@> ./startConversion.sh -?
+===================
+LAR Model extractor
+===================
+Either run without args or with
+To use args enable it with -u
+-d <input images>       : Directory containing input images
+-f <best image>         : Image to quantize on
+-q <colors>             : Number of colors to quantize (min 2)
+-c                      : Use OpenCL
+\end{lstlisting}
+
+Command line switches are not mandatory: every script has an interactive shell in which you can input, step by step, the correct input for the program.
+
+\section{Input}
+\subsection{startConversion scripts}
+
+\subsection{visualize}
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% BIBLIOGRAPHY AND OTHER LISTS
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% A small distance to the other stuff in the table of contents (toc)
+\addtocontents{toc}{\protect\vspace*{\baselineskip}}
+
+%% The Bibliography
+%% ==> You need a file 'literature.bib' for this.
+%% ==> You need to run BibTeX for this (Project | Properties... | Uses BibTeX)
+\addcontentsline{toc}{chapter}{Bibliography} %'Bibliography' into toc
+\nocite{*} %Even non-cited BibTeX-Entries will be shown.
+\bibliographystyle{plain} %Style of Bibliography: plain / apalike / amsalpha / ...
+\bibliography{literature} %You need a file 'literature.bib' for this.
+
+%% The List of Figures
+%\clearpage
+%\addcontentsline{toc}{chapter}{List of Figures}
+%\listoffigures
+
+%% The List of Tables
+%\clearpage
+%\addcontentsline{toc}{chapter}{List of Tables}
+%\listoftables
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% APPENDICES
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\appendix
+%% ==> Write your text here or include other files.
+
+%\input{FileName} %You need a file 'FileName.tex' for this.
+
+
+\end{document}
+
