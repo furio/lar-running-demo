@@ -293,52 +293,21 @@ mkdir -p $COMPUTATION_DIR >> $LOGFILE 2>&1
 COMPUTATION_DIR_BIN=$TMPDIRECTORY/$COMPDIRBIN
 mkdir -p $COMPUTATION_DIR_BIN >> $LOGFILE 2>&1
 
-if [ $OPENCL -eq 1 ]; then
-	echo -n "Computing input binary chains... "
-	CHAINCURR=$COLOR_SEL
-	$PYBIN ./py/computation/step_calcchains_serial_tobinary_filter_proc.py -b $BORDER_DIR/$BORDER_FILE -x $BORDER_X -y $BORDER_Y -z $BORDER_Z -i $TMPIMGDIRECTORY -c $COLORS -d $CHAINCURR -q $BESTFILE -o $COMPUTATION_DIR >> $LOGFILE 2>&1
-	if [ $? -ne 0 ]; then
-		echo "Error while computing output chains"
-		exit 1
-	fi
-	# Merge selectors
-	for pSelettore in $COMPUTATION_DIR_BIN/pselettori*.bin; do
-		colorId=$(basename $pOutput | cut -d'.' -f1 | cut -d'-' -f3)
-		cat $pOutput >> $COMPUTATION_DIR_BIN/selettori-$colorId.bin
-		rm -f $pOutput >> $LOGFILE 2>&1
-	done
-	echo -n "done!"
-	echo ""	
-	# Call OpenCL JAR
-	# here use updated jar that outputs directly in binary in $COMPUTATION_DIR_BIN
-	echo -n "Computing output binary chains... "
-	for selettoreFile in $COMPUTATION_DIR/selettori-*.bin; do
-		selettoreId=$(basename $selettoreFile | cut -d'.' -f1 | cut -d'-' -f2)
-		LD_PRELOAD=$JAVA_HOME/jre/lib/amd64/libjsig.so $JAVABIN -d64 -Xcheck:jni -Xmx16G -XX:MaxPermSize=4G -XX:PermSize=512M -jar ./java/$JARNAME -b $BORDER_DIR/$BORDER_FILE -v $selettoreFile -y -o $COMPUTATION_DIR_BIN/output-$selettoreId.bin
-		if [ $? -ne 0 ]; then
-			echo "Error while computing output binary chains"
-			exit 1
-		fi
-	done
-	echo -n "done!"
-	echo ""	
-else
-	echo -n "Computing output binary chains... "
-	CHAINCURR=$COLOR_SEL
-	$PYBIN ./py/computation/step_calcchains_serial_tobinary_filter_proc.py -r -b $BORDER_DIR/$BORDER_FILE -x $BORDER_X -y $BORDER_Y -z $BORDER_Z -i $TMPIMGDIRECTORY -c $COLORS -d $CHAINCURR -q $BESTFILE -o $COMPUTATION_DIR_BIN >> $LOGFILE 2>&1
-	if [ $? -ne 0 ]; then
-		echo "Error while computing output chains"
-		exit 1
-	fi
-	# Merge output
-	for pOutput in $COMPUTATION_DIR_BIN/poutput*.bin; do
-		colorId=$(basename $pOutput | cut -d'.' -f1 | cut -d'-' -f3)
-		cat $pOutput >> $COMPUTATION_DIR_BIN/output-$colorId.bin
-		rm -f $pOutput >> $LOGFILE 2>&1
-	done
-	echo -n "done!"
-	echo ""
+echo -n "Computing output binary chains... "
+CHAINCURR=$COLOR_SEL
+$PYBIN ./py/computation/step_calcchains_serial_tobinary_filter_proc.py -r -b $BORDER_DIR/$BORDER_FILE -x $BORDER_X -y $BORDER_Y -z $BORDER_Z -i $TMPIMGDIRECTORY -c $COLORS -d $CHAINCURR -q $BESTFILE -o $COMPUTATION_DIR_BIN >> $LOGFILE 2>&1
+if [ $? -ne 0 ]; then
+	echo "Error while computing output chains"
+	exit 1
 fi
+# Merge output
+for pOutput in $COMPUTATION_DIR_BIN/poutput*.bin; do
+	colorId=$(basename $pOutput | cut -d'.' -f1 | cut -d'-' -f3)
+	cat $pOutput >> $COMPUTATION_DIR_BIN/output-$colorId.bin
+	rm -f $pOutput >> $LOGFILE 2>&1
+done
+echo -n "done!"
+echo ""
 
 # stl conversion and merge
 STL_DIR=$TMPDIRECTORY/$STLDIR

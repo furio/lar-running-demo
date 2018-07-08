@@ -74,7 +74,18 @@ async def computeChainsAsync(queueIn, queueOut, bordo3):
 		log(2, [ 'computeChainsAsync - Task' ])
 		cudaCSR2 = p.sparse.csr_matrix((chain.data, chain.indices, chain.indptr), shape=chain.shape)
 		cudaCSRm = sparseIstance.csrgemm_ez(cudaCSR1, cudaCSR2)
-		await queueOut.put( ( True, coords, csr_matrix((cudaCSRm.data, cudaCSRm.indices, cudaCSRm.indptr), shape=cudaCSRm.shape, dtype=np.int32) ) )
+
+		hostCOOm = csr_matrix((cudaCSRm.data, cudaCSRm.indices, cudaCSRm.indptr), shape=cudaCSRm.shape, dtype=np.int32).tocoo()
+		
+		k = 0
+		while (k < len(hostCOOm.data)):
+			if (hostCOOm.data[k] % 2 == 1): 
+				hostCOOm.data[k] = 1
+			else: 
+				hostCOOm.data[k] = 0
+			k += 1
+
+		await queueOut.put( ( True, coords, hostCOOm.tocsr() ) )
 		queueIn.task_done()
 	
 	await queueOut.put( (False, None, None) )
@@ -116,16 +127,13 @@ async def createChainsAsync(queueIn, queueOut, imageHeight,imageWidth, imageDx,i
 					chains3D = []
 					zStart = startImage - beginImageStack
 
-					print(str(image))
-					print(str(saveTheColors))
-
 					for x in xrange(nx):
 						for y in xrange(ny):
 							for z in xrange(nz):
 								if (image[z,x,y] == saveTheColors[colorIdx]):
 									chains3D.append(addrChain(x,y,z,nx,ny,nz))
 					
-					csrChains3D = coo_matrix((scipy.ones(len(chains3D)),(chains3D,scipy.zeros(len(chains3D)))),shape=(bordo3shape[1],1)).tocsr()
+					csrChains3D = coo_matrix((scipy.ones(len(chains3D)),(chains3D,scipy.zeros(len(chains3D)))),shape=(bordo3shape[1],1),dtype=np.float32).tocsr()
 					await queueOut.put( (True, [zStart,xStart,yStart], csrChains3D) )
 
 			queueIn.task_done()
@@ -167,7 +175,7 @@ def startComputeChainsCuda(imageHeight,imageWidth,imageDepth, imageDx,imageDy,im
 		COLCOUNT = bordo3_json['COLCOUNT']
 		ROW = np.asarray(bordo3_json['ROW'], dtype=np.int32)
 		COL = np.asarray(bordo3_json['COL'], dtype=np.int32)
-		DATA = np.asarray(bordo3_json['DATA'], dtype=np.int8)
+		DATA = np.asarray(bordo3_json['DATA'], dtype=np.float32)
 		bordo3 = csr_matrix((DATA,COL,ROW),shape=(ROWCOUNT,COLCOUNT))
 
 	try:
