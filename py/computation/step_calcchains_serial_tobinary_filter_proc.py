@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 from lar import invertIndex, indFun, larBoundaryChainNew
-from scipy.sparse import vstack,hstack,csr_matrix
+from scipy.sparse import vstack,hstack,csr_matrix,coo_matrix
 import json
 import scipy
 import numpy as np
@@ -14,12 +14,9 @@ import traceback
 #
 import matplotlib.pyplot as plt
 # threading
-import multiprocessing
-from multiprocessing import Process, Value, Lock
-from Queue import Queue
-# cython stuf. not used now
-import pyximport; pyximport.install()
-import calc_chains_helper as cch
+import asyncio
+# pycuda
+import pyculib as p
 
 try:
     xrange
@@ -46,7 +43,8 @@ BIN_EXTENSION = ".bin"
 # ------------------------------------------------------------
 
 def countFilesInADir(directory):
-	return len(os.walk(directory).next()[2])
+	fList = [name for name in os.listdir(directory) if os.path.isfile(directory + '/' + name) and not name.startswith('.') ]
+	return len(fList)
 	
 def isArrayEmpty(arr):
 	return all(e == 0 for e in arr)
@@ -58,46 +56,56 @@ def writeOffsetToFile(file, offsetCurr):
 	file.write( struct.pack('>I', offsetCurr[2]) )
 # ------------------------------------------------------------
 
-def computeChainsThread(startImage,endImage,imageHeight,imageWidth, imageDx,imageDy,imageDz, Nx,Ny,Nz, calculateout,BORDER_FILE, colors,pixelCalc,centroidsCalc, colorIdx, imageDir, DIR_O):
-	log(2, [ "Working task: " +str(startImage) + "-" + str(endImage) + " [" + str( imageHeight) + "-" + str( imageWidth ) + "-" + str(imageDx) + "-" + str( imageDy) + "-" + str (imageDz) + "]" ])
+async def computeChainsAsync(queueIn, queueOut, bordo3):
+	# (False/True, [zStart,xStart,yStart], csrMv)
 	
-	bordo3 = None
-	if (calculateout == True):
-		with open(BORDER_FILE, "r") as file:
-			bordo3_json = json.load(file)
-			ROWCOUNT = bordo3_json['ROWCOUNT']
-			COLCOUNT = bordo3_json['COLCOUNT']
-			ROW = np.asarray(bordo3_json['ROW'], dtype=np.int32)
-			COL = np.asarray(bordo3_json['COL'], dtype=np.int32)
-			DATA = np.asarray(bordo3_json['DATA'], dtype=np.int8)
-			bordo3 = csr_matrix((DATA,COL,ROW),shape=(ROWCOUNT,COLCOUNT))
+	log(2, [ 'computeChainsAsync' ])
+
+	# init pycuda
+	sparseIstance = p.sparse.Sparse()
+	cudaCSR1 = p.sparse.csr_matrix((bordo3.data, bordo3.indices, bordo3.indptr), shape=bordo3.shape)
+
+	while True:
+		end,coords,chain = await queueIn.get()
+		if end is False:
+			queueIn.task_done()
+			break
+		
+		log(2, [ 'computeChainsAsync - Task' ])
+		cudaCSR2 = p.sparse.csr_matrix((chain.data, chain.indices, chain.indptr), shape=chain.shape)
+		cudaCSRm = sparseIstance.csrgemm_ez(cudaCSR1, cudaCSR2)
+		await queueOut.put( ( True, coords, csr_matrix((cudaCSRm.data, cudaCSRm.indices, cudaCSRm.indptr), shape=cudaCSRm.shape, dtype=np.int32) ) )
+		queueIn.task_done()
+	
+	await queueOut.put( (False, None, None) )
+
+def addrChain(x, y, z, nx, ny, nz):
+	return x + (nx) * (y + (ny) * (z))
+
+async def createChainsAsync(queueIn, queueOut, imageHeight,imageWidth, imageDx,imageDy,imageDz, colors,pixelCalc,centroidsCalc, colorIdx, imageDir, bordo3shape):
+	# (False/True, (startImage,endImage))
+
+	log(2, [ 'createChainsAsync' ])
 
 	xEnd, yEnd = 0,0
 	beginImageStack = 0
 	saveTheColors = centroidsCalc
 	saveTheColors = np.array( sorted(saveTheColors.reshape(1,colors)[0]), dtype=np.int )
 
-	fileName = "pselettori-"
-	if (calculateout == True):
-		fileName = "poutput-"
-	fileName = fileName + str(startImage) + "_" + str(endImage) + "-"
+	while True:
+		end,startEnd = await queueIn.get()
+		if end is False:
+			queueIn.task_done()
+			break
 
-	returnProcess = 0
-
-	try:
-		fileToWrite = open(DIR_O+'/'+fileName+str(saveTheColors[colorIdx])+BIN_EXTENSION, "wb")
 		try:
+			startImage, endImage = startEnd
 			log(2, [ "Working task: " +str(startImage) + "-" + str(endImage) + " [loading colors]" ])
-			theImage,colors,theColors = pngstack2array3d(imageDir, startImage, endImage, colors, pixelCalc, centroidsCalc)		
-			# theColors = theColors.reshape(1,colors)
-			# if (sorted(theColors[0]) != saveTheColors):
-			#	log(1, [ "Error: colors have changed"] )
-			#	sys.exit(2)
-			
+			theImage,colors,theColors = pngstack2array3d(imageDir, startImage, endImage, colors, pixelCalc, centroidsCalc)
 			log(2, [ "Working task: " +str(startImage) + "-" + str(endImage) + " [comp loop]" ])
-			for xBlock in xrange(imageHeight/imageDx):
+			for xBlock in xrange(imageHeight//imageDx):
 				# print "Working task: " +str(startImage) + "-" + str(endImage) + " [Xblock]"
-				for yBlock in xrange(imageWidth/imageDy):
+				for yBlock in xrange(imageWidth//imageDy):
 					# print "Working task: " +str(startImage) + "-" + str(endImage) + " [Yblock]"
 					xStart, yStart = xBlock * imageDx, yBlock * imageDy
 					xEnd, yEnd = xStart+imageDx, yStart+imageDy
@@ -105,60 +113,45 @@ def computeChainsThread(startImage,endImage,imageHeight,imageWidth, imageDx,imag
 					image = theImage[:, xStart:xEnd, yStart:yEnd]
 					nz,nx,ny = image.shape
 
-					# Compute a quotient complex of chains with constant field
-					# ------------------------------------------------------------
-
-					chains3D_old = []
-					chains3D = None
-					hasSomeOne = False
-					if (calculateout != True):
-						chains3D = np.zeros(nx*ny*nz, dtype=np.int32)
-								
+					chains3D = []
 					zStart = startImage - beginImageStack
 
-					if (calculateout == True):
-						chains3D_old = cch.setList(nx,ny,nz, colorIdx, image,saveTheColors)
-					else:
-						hasSomeOne,chains3D = cch.setListNP(nx,ny,nz, colorIdx, image,saveTheColors)
-			
-					# print "Working task: " +str(startImage) + "-" + str(endImage) + " [hasSomeOne: " + str(hasSomeOne) +"]"
-							
-					# Compute the boundary complex of the quotient cell
-					# ------------------------------------------------------------
-					objectBoundaryChain = None
-					if (calculateout == True) and (len(chains3D_old) > 0):
-						objectBoundaryChain = larBoundaryChainNew(bordo3,chains3D_old)
-							
-					# Save
-					if (calculateout == True):
-						if (objectBoundaryChain != None):
-							writeOffsetToFile( fileToWrite, np.array([zStart,xStart,yStart], dtype=np.int32) )
-							fileToWrite.write( bytearray( np.array(objectBoundaryChain.toarray().astype('b').flatten()) ) )
-					else:
-						if (hasSomeOne != False):
-							writeOffsetToFile( fileToWrite, np.array([zStart,xStart,yStart], dtype=np.int32) )
-							fileToWrite.write( bytearray( np.array(chains3D, dtype=np.dtype('b')) ) )
+					print(str(image))
+					print(str(saveTheColors))
+
+					for x in xrange(nx):
+						for y in xrange(ny):
+							for z in xrange(nz):
+								if (image[z,x,y] == saveTheColors[colorIdx]):
+									chains3D.append(addrChain(x,y,z,nx,ny,nz))
+					
+					csrChains3D = coo_matrix((scipy.ones(len(chains3D)),(chains3D,scipy.zeros(len(chains3D)))),shape=(bordo3shape[1],1)).tocsr()
+					await queueOut.put( (True, [zStart,xStart,yStart], csrChains3D) )
+
+			queueIn.task_done()
 		except:
 			exc_type, exc_value, exc_traceback = sys.exc_info()
 			lines = traceback.format_exception(exc_type, exc_value, exc_traceback)
-			log(1, [ "Error: " + ''.join('!! ' + line for line in lines) ])  # Log it or whatever here
-			returnProcess = 2
-		finally:
-			fileToWrite.close()
-		# -------------------------------------------------------------------------
-	except:
-		exc_type, exc_value, exc_traceback = sys.exc_info()
-		lines = traceback.format_exception(exc_type, exc_value, exc_traceback)
-		log(1, [ "Error: " + ''.join('!! ' + line for line in lines) ])  # Log it or whatever here
-		returnProcess = 2
+			log(1, [ "Error: " + ''.join('!! ' + line for line in lines) ])  # Log it or whatever here			
+	
+	await queueOut.put( (False, None, None) )
 
-	return returnProcess
+async def startChainProcessAsync(queueOut, imageDepth, imageDz):
+	log(2, [ 'startChainProcessAsync ' + str(imageDepth) + '-' + str(imageDz) ])
+	endImage = 0
 
-processRes = []
-def collectResult(resData):
-	processRes.append(resData)
+	for j in xrange(imageDepth//imageDz):
+		startImage = endImage
+		endImage = startImage + imageDz
+		log(2, [ 'startChainProcessAsync', 'put', str((startImage, endImage)) ])
+		await queueOut.put( (True, (startImage, endImage)) )
+		log(2, [ "Added task: " + str(j) + " -- (" + str(startImage) + "," + str(endImage) + ")" ])
+	
+	await queueOut.put((False, None))
 
-def startComputeChains(imageHeight,imageWidth,imageDepth, imageDx,imageDy,imageDz, Nx,Ny,Nz, calculateout,BORDER_FILE, colors,pixelCalc,centroidsCalc, colorIdx,INPUT_DIR,DIR_O):
+def startComputeChainsCuda(imageHeight,imageWidth,imageDepth, imageDx,imageDy,imageDz, BORDER_FILE, colors,pixelCalc,centroidsCalc, colorIdx,INPUT_DIR,DIR_O):
+	returnValue = 2
+	
 	beginImageStack = 0
 	endImage = beginImageStack
 	
@@ -166,31 +159,38 @@ def startComputeChains(imageHeight,imageWidth,imageDepth, imageDx,imageDy,imageD
 	log(2, [ centroidsCalc ])
 	saveTheColors = np.array( sorted(saveTheColors.reshape(1,colors)[0]), dtype=np.int )
 	log(2, [ saveTheColors ])
-	# print str(imageHeight) + '-' + str(imageWidth) + '-' + str(imageDepth)
-	# print str(imageDx) + '-' + str(imageDy) + '-' + str(imageDz)
-	# print str(Nx) + '-' + str(Ny) + '-' + str(Nz)
-	returnValue = 2
 
-	processPool = max(1, multiprocessing.cpu_count()/2)
-	log(2, [ "Starting pool with: " + str(processPool) ])
+	bordo3 = None
+	with open(BORDER_FILE, "r") as file:
+		bordo3_json = json.load(file)
+		ROWCOUNT = bordo3_json['ROWCOUNT']
+		COLCOUNT = bordo3_json['COLCOUNT']
+		ROW = np.asarray(bordo3_json['ROW'], dtype=np.int32)
+		COL = np.asarray(bordo3_json['COL'], dtype=np.int32)
+		DATA = np.asarray(bordo3_json['DATA'], dtype=np.int8)
+		bordo3 = csr_matrix((DATA,COL,ROW),shape=(ROWCOUNT,COLCOUNT))
 
 	try:
-		pool = multiprocessing.Pool(processPool)
-		log(2, [ 'Start pool' ])
+		log(2, [ 'Start Cuda' ])
 		
-		for j in xrange(imageDepth/imageDz):
-			startImage = endImage
-			endImage = startImage + imageDz
-			log(2, [ "Added task: " + str(j) + " -- (" + str(startImage) + "," + str(endImage) + ")" ])
-			pool.apply_async(computeChainsThread, args = (startImage,endImage,imageHeight,imageWidth, imageDx,imageDy,imageDz, Nx,Ny,Nz, calculateout,BORDER_FILE, colors,pixelCalc,centroidsCalc, colorIdx,INPUT_DIR,DIR_O, ), callback = collectResult)
+		loop = asyncio.get_event_loop()
+		queueStackImages = asyncio.Queue(loop=loop)
+		queueChainList = asyncio.Queue(loop=loop)
+		queueExtractedBorders = asyncio.Queue(loop=loop)
 
 		log(2, [ "Waiting for completion..." ])
-		pool.close()
-		pool.join()
-		
-		log(1, [ "Completed: " + str(processRes) ])
-		if (sum(processRes) == 0):
-			returnValue = 0		
+		loop.run_until_complete(asyncio.gather(
+			startChainProcessAsync(queueStackImages, imageDepth, imageDz), 
+			createChainsAsync(queueStackImages, queueChainList, imageHeight,imageWidth,imageDx,imageDy,imageDz, colors,pixelCalc,centroidsCalc, colorIdx, INPUT_DIR, bordo3.shape), 
+			computeChainsAsync(queueChainList, queueExtractedBorders, bordo3),
+			loop=loop))
+
+		resultsChains = [x for x in queueExtractedBorders.get_nowait()] 
+
+		loop.close()
+
+		log(1, [ "Completed ", str(resultsChains)])
+		returnValue = 0
 	except:
 		exc_type, exc_value, exc_traceback = sys.exc_info()
 		lines = traceback.format_exception(exc_type, exc_value, exc_traceback)
@@ -198,58 +198,15 @@ def startComputeChains(imageHeight,imageWidth,imageDepth, imageDx,imageDy,imageD
 
 	return returnValue
 
-def startComputeChainsCuda(imageHeight,imageWidth,imageDepth, imageDx,imageDy,imageDz, Nx,Ny,Nz, calculateout,BORDER_FILE, colors,pixelCalc,centroidsCalc, colorIdx,INPUT_DIR,DIR_O):
-	beginImageStack = 0
-	endImage = beginImageStack
-	
-	saveTheColors = centroidsCalc
-	log(2, [ centroidsCalc ])
-	saveTheColors = np.array( sorted(saveTheColors.reshape(1,colors)[0]), dtype=np.int )
-	log(2, [ saveTheColors ])
-	# print str(imageHeight) + '-' + str(imageWidth) + '-' + str(imageDepth)
-	# print str(imageDx) + '-' + str(imageDy) + '-' + str(imageDz)
-	# print str(Nx) + '-' + str(Ny) + '-' + str(Nz)
-	returnValue = 2
-
-	processPool = max(1, multiprocessing.cpu_count()/2)
-	log(2, [ "Starting pool with: " + str(processPool) ])
-
-	try:
-		pool = multiprocessing.Pool(processPool)
-		log(2, [ 'Start pool' ])
-		
-		for j in xrange(imageDepth/imageDz):
-			startImage = endImage
-			endImage = startImage + imageDz
-			log(2, [ "Added task: " + str(j) + " -- (" + str(startImage) + "," + str(endImage) + ")" ])
-			pool.apply_async(computeChainsThread, args = (startImage,endImage,imageHeight,imageWidth, imageDx,imageDy,imageDz, Nx,Ny,Nz, calculateout,BORDER_FILE, colors,pixelCalc,centroidsCalc, colorIdx,INPUT_DIR,DIR_O, ), callback = collectResult)
-
-		log(2, [ "Waiting for completion..." ])
-		pool.close()
-		pool.join()
-		
-		log(1, [ "Completed: " + str(processRes) ])
-		if (sum(processRes) == 0):
-			returnValue = 0		
-	except:
-		exc_type, exc_value, exc_traceback = sys.exc_info()
-		lines = traceback.format_exception(exc_type, exc_value, exc_traceback)
-		log(1, [ "Error: " + ''.join('!! ' + line for line in lines) ])  # Log it or whatever here
-
-	return returnValue
-
-def runComputation(imageDx,imageDy,imageDz, colors,coloridx,calculateout, V,FV, INPUT_DIR,BEST_IMAGE,BORDER_FILE,DIR_O, *, usecuda=False):
+def runComputation(imageDx,imageDy,imageDz, colors,coloridx, V,FV, INPUT_DIR,BEST_IMAGE,BORDER_FILE,DIR_O):
 	imageHeight,imageWidth = getImageData(INPUT_DIR+str(BEST_IMAGE)+PNG_EXTENSION)
 	imageDepth = countFilesInADir(INPUT_DIR)
-	Nx,Ny,Nz = imageHeight/imageDx, imageWidth/imageDx, imageDepth/imageDz
+	Nx,Ny,Nz = imageHeight//imageDx, imageWidth//imageDx, imageDepth//imageDz
 	returnValue = 2
 	
 	try:
 		pixelCalc, centroidsCalc = centroidcalc(INPUT_DIR, BEST_IMAGE, colors)
-		if usecuda == False:
-			returnValue = startComputeChains(imageHeight,imageWidth,imageDepth, imageDx,imageDy,imageDz, Nx,Ny,Nz, calculateout,BORDER_FILE, colors,pixelCalc,centroidsCalc, coloridx,INPUT_DIR,DIR_O)
-		else:
-			returnValue = startComputeChainsCuda(imageHeight,imageWidth,imageDepth, imageDx,imageDy,imageDz, Nx,Ny,Nz, calculateout,BORDER_FILE, colors,pixelCalc,centroidsCalc, coloridx,INPUT_DIR,DIR_O)
+		returnValue = startComputeChainsCuda(imageHeight,imageWidth,imageDepth, imageDx,imageDy,imageDz, BORDER_FILE, colors,pixelCalc,centroidsCalc, coloridx,INPUT_DIR,DIR_O)
 
 	except:
 		exc_type, exc_value, exc_traceback = sys.exc_info()
@@ -258,14 +215,15 @@ def runComputation(imageDx,imageDy,imageDz, colors,coloridx,calculateout, V,FV, 
 		returnValue = 2
 		
 	sys.exit(returnValue)
-	
+
+# python py/computation/step_calcchains_serial_tobinary_filter_proc.py -b $(pwd)/testBorder/bordo3_8-8-8.json -x 8 -y 8 -z 8 -i $(pwd)/testImages -c 2 -d 1 -q 0 -o $(pwd)/testOutchains
 def main(argv):
-	ARGS_STRING = 'Args: -r -b <borderfile> -x <borderX> -y <borderY> -z <borderZ> -i <inputdirectory> -c <colors> -d <coloridx> -o <outputdir> -q <bestimage>'
+	ARGS_STRING = 'Args: -b <borderfile> -x <borderX> -y <borderY> -z <borderZ> -i <inputdirectory> -c <colors> -d <coloridx> -o <outputdir> -q <bestimage>'
 
 	try:
-		opts, args = getopt.getopt(argv,"arb:x:y:z:i:c:d:o:q:")
+		opts, args = getopt.getopt(argv,"rb:x:y:z:i:c:d:o:q:")
 	except getopt.GetoptError:
-		print ARGS_STRING
+		print(ARGS_STRING)
 		sys.exit(2)
 	
 	nx = ny = nz = imageDx = imageDy = imageDz = 64
@@ -273,8 +231,6 @@ def main(argv):
 	coloridx = 0
 	
 	mandatory = 6
-	calculateout = False
-	usecuda = False
 	#Files
 	BORDER_FILE = 'bordo3.json'
 	BEST_IMAGE = ''
@@ -289,8 +245,6 @@ def main(argv):
 			ny = nz = imageDy = imageDz = int(arg)
 		elif opt == '-z':
 			nz = imageDz = int(arg)
-		elif opt == '-r':
-			calculateout = True
 		elif opt == '-i':
 			DIR_IN = arg + '/'
 			mandatory = mandatory - 1
@@ -307,18 +261,16 @@ def main(argv):
 			mandatory = mandatory - 1
 			coloridx = int(arg)			
 		elif opt == '-q':
-			BEST_IMAGE = int(arg)
-		elif opt == '-a':
-			usecuda = True			
+			BEST_IMAGE = int(arg)		
 			
 	if mandatory != 0:
-		print 'Not all arguments where given'
-		print ARGS_STRING
+		print('Not all arguments where given')
+		print(ARGS_STRING)
 		sys.exit(2)
 		
 	if (coloridx >= colors):
-		print 'Not all arguments where given (coloridx >= colors)'
-		print ARGS_STRING
+		print('Not all arguments where given (coloridx >= colors)')
+		print(RGS_STRING)
 		sys.exit(2)
 	
 	chunksize = nx * ny + nx * nz + ny * nz + 3 * nx * ny * nz
@@ -334,7 +286,7 @@ def main(argv):
 		if (x < nx) and (z < nz): FV.append([h,ind(x+1,y,z),ind(x,y,z+1),ind(x+1,y,z+1)])
 		if (y < ny) and (z < nz): FV.append([h,ind(x,y+1,z),ind(x,y,z+1),ind(x,y+1,z+1)])
 
-	runComputation(imageDx, imageDy, imageDz, colors, coloridx, calculateout, V, FV, DIR_IN, BEST_IMAGE, BORDER_FILE, DIR_O, usecuda=usecuda)
+	runComputation(imageDx, imageDy, imageDz, colors, coloridx, V, FV, DIR_IN, BEST_IMAGE, BORDER_FILE, DIR_O)
 
 if __name__ == "__main__":
 	main(sys.argv[1:])

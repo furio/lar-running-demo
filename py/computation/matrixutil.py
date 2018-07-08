@@ -33,9 +33,11 @@ def matrixProduct(CSRm1,CSRm2):
     return CSRm
 
 def matrixProductAccel(matrixOne, matrixTwo):
+    sparseIstance = p.sparse.Sparse()
+    
     cudaCSR1 = p.sparse.csr_matrix((matrixOne.data, matrixOne.indices, matrixOne.indptr), shape=matrixOne.shape)
     cudaCSR2 = p.sparse.csr_matrix((matrixTwo.data, matrixTwo.indices, matrixTwo.indptr), shape=matrixTwo.shape)
-    sparseIstance = p.sparse.Sparse()
+    
     cudaCSRm = sparseIstance.csrgemm_ez(cudaCSR1, cudaCSR2)
     return csr_matrix((cudaCSRm.data, cudaCSRm.indices, cudaCSRm.indptr), shape=cudaCSRm.shape, dtype=np.int32)
 
