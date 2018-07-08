@@ -361,16 +361,6 @@ def larBoundaryChain(csrBoundaryMat,brcCellList):
     out = csrBinFilter(csrmat)
     return out
 
-def larBoundaryChainNew(csrBoundaryMat,brcCellList):
-    n,m = csrBoundaryMat.shape
-    data = scipy.ones(len(brcCellList))
-    i = brcCellList
-    j = scipy.zeros(len(brcCellList))
-    csrChain = coo_matrix((data,(i,j)),shape=(m,1)).tocsr()
-    csrmat = matrixProduct(csrBoundaryMat,csrChain)
-    out = csrBinFilter(csrmat)
-    return out    
-
 #------------------------------------------------------------------
 def larCoboundaryChain(csrCoBoundaryMat,brcCellList):
     m = csrGetNumberOfColumns(csrCoBoundaryMat)

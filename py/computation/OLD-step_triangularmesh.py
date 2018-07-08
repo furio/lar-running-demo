@@ -24,22 +24,22 @@ logging_level = 0;
 def log(n, l):
 	if __name__=="__main__" and n <= logging_level:
 		for s in l:
-			print "Log:", s;
+			print "Log:", s
 
-timer = 1;
+timer = 1
 
 timer_last =  tm.time()
 
 def timer_start(s):
-	global timer_last;
+	global timer_last
 	if __name__=="__main__" and timer == 1:   
-		log(3, ["Timer start:" + s]);
-	timer_last = tm.time();
+		log(3, ["Timer start:" + s])
+	timer_last = tm.time()
 
 def timer_stop():
-	global timer_last;
+	global timer_last
 	if __name__=="__main__" and timer == 1:   
-		log(3, ["Timer stop :" + str(tm.time() - timer_last)]);
+		log(3, ["Timer stop :" + str(tm.time() - timer_last)])
 
 # ------------------------------------------------------------
 
@@ -75,34 +75,34 @@ def readFile(V,FV,chunksize,inputFile,OUT_DIR): #outputVtx="outputVtx.obj",outpu
 						xStart = struct.unpack('>I', file.read(4))[0]
 						yStart = struct.unpack('>I', file.read(4))[0]
 					
-						log(1, ["zStart, xStart, yStart = " + str(zStart) + "," + str(xStart) + "," + str(yStart)]);
+						log(1, ["zStart, xStart, yStart = " + str(zStart) + "," + str(xStart) + "," + str(yStart)])
 						#	zStart, xStart, yStart = LISTA_OFFSET[i].astype(float64)
 
-						LISTA_VETTORI2 = np.zeros(chunksize,dtype=int32);
+						LISTA_VETTORI2 = np.zeros(chunksize,dtype=int32)
 
 						# log(1, ["chunksize = " + str(chunksize)]);
-						temp = file.read(chunksize);
+						temp = file.read(chunksize)
 						# log(1, ["chunksize = OK"]);
 
 						i = 0
-						timer_start("LISTA_VETTORI2 " + str(i));
+						timer_start("LISTA_VETTORI2 " + str(i))
 						while (i < chunksize):
 							if (temp[i] == '\x01'):
-								LISTA_VETTORI2[i] = 1;
-							i = i + 1;
-						timer_stop();
-						log(1, ["LISTA_VETTORI2[i] = " + str(i)]);
+								LISTA_VETTORI2[i] = 1
+							i = i + 1
+						timer_stop()
+						log(1, ["LISTA_VETTORI2[i] = " + str(i)])
 					
-						timer_start("objectBoundaryChain ");
+						timer_start("objectBoundaryChain ")
 						l = len(LISTA_VETTORI2)
 						objectBoundaryChain = scipy.sparse.csr_matrix(LISTA_VETTORI2.reshape((l,1)))
-						timer_stop();
+						timer_stop()
 
-						timer_start("csrChainToCellList " + str(i));
+						timer_start("csrChainToCellList " + str(i))
 						b2cells = csrChainToCellList(objectBoundaryChain)
-						timer_stop();
+						timer_stop()
 
-						timer_start("MKPOLS " + str(i));
+						timer_start("MKPOLS " + str(i))
 					
 						for f in b2cells:
 							old_vertex_count = vertex_count
@@ -136,7 +136,7 @@ def readFile(V,FV,chunksize,inputFile,OUT_DIR): #outputVtx="outputVtx.obj",outpu
 						fileVertex.flush()
 						fileFaces.flush()
 						
-					timer_stop();
+					timer_stop()
 				except:
 					exc_type, exc_value, exc_traceback = sys.exc_info()
 					lines = traceback.format_exception(exc_type, exc_value, exc_traceback)

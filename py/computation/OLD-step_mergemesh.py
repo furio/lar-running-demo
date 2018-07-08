@@ -19,22 +19,22 @@ logging_level = 1;
 def log(n, l):
 	if __name__=="__main__" and n <= logging_level:
 		for s in l:
-			print "Log:", s;
+			print "Log:", s
 
-timer = 1;
+timer = 1
 
 timer_last =  tm.time()
 
 def timer_start(s):
-	global timer_last;
+	global timer_last
 	if __name__=="__main__" and timer == 1:   
-		log(3, ["Timer start:" + s]);
-	timer_last = tm.time();
+		log(3, ["Timer start:" + s])
+	timer_last = tm.time()
 
 def timer_stop():
-	global timer_last;
+	global timer_last
 	if __name__=="__main__" and timer == 1:   
-		log(3, ["Timer stop :" + str(tm.time() - timer_last)]);
+		log(3, ["Timer stop :" + str(tm.time() - timer_last)])
 
 # ------------------------------------------------------------
 

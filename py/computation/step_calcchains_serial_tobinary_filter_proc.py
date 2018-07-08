@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-from lar import invertIndex, indFun, larBoundaryChainNew
+from lar import invertIndex, indFun
 from scipy.sparse import vstack,hstack,csr_matrix,coo_matrix
 import json
 import scipy
@@ -57,7 +57,7 @@ def writeOffsetToFile(file, offsetCurr):
 # ------------------------------------------------------------
 
 async def computeChainsAsync(queueIn, queueOut, bordo3):
-	# (False/True, [zStart,xStart,yStart], csrMv)
+	# (False/True, {x:,y:,z:}, csrMv)
 	
 	log(2, [ 'computeChainsAsync' ])
 
@@ -71,21 +71,24 @@ async def computeChainsAsync(queueIn, queueOut, bordo3):
 			queueIn.task_done()
 			break
 		
+		# larBoundaryChain
 		log(2, [ 'computeChainsAsync - Task' ])
 		cudaCSR2 = p.sparse.csr_matrix((chain.data, chain.indices, chain.indptr), shape=chain.shape)
 		cudaCSRm = sparseIstance.csrgemm_ez(cudaCSR1, cudaCSR2)
 
-		hostCOOm = csr_matrix((cudaCSRm.data, cudaCSRm.indices, cudaCSRm.indptr), shape=cudaCSRm.shape, dtype=np.int32).tocoo()
-		
+		hostM = csr_matrix((cudaCSRm.data, cudaCSRm.indices, cudaCSRm.indptr), shape=cudaCSRm.shape, dtype=np.int32).tocoo()
+
+		newRow = []
 		k = 0
-		while (k < len(hostCOOm.data)):
-			if (hostCOOm.data[k] % 2 == 1): 
-				hostCOOm.data[k] = 1
-			else: 
-				hostCOOm.data[k] = 0
+		while (k < len(hostM.data) - 1):
+			if (hostM.data[k] % 2 == 1):
+				newRow.append(hostM.row[k])
+
 			k += 1
 
-		await queueOut.put( ( True, coords, hostCOOm.tocsr() ) )
+		hostCSRm = coo_matrix( (np.ones(len(newRow),dtype=np.int8), (np.array(newRow).astype(np.int32), np.zeros(len(newRow),dtype=np.int8))), shape=cudaCSRm.shape ).tocsr()
+
+		await queueOut.put( ( True, coords, hostCSRm ) )
 		queueIn.task_done()
 	
 	await queueOut.put( (False, None, None) )
@@ -134,7 +137,7 @@ async def createChainsAsync(queueIn, queueOut, imageHeight,imageWidth, imageDx,i
 									chains3D.append(addrChain(x,y,z,nx,ny,nz))
 					
 					csrChains3D = coo_matrix((scipy.ones(len(chains3D)),(chains3D,scipy.zeros(len(chains3D)))),shape=(bordo3shape[1],1),dtype=np.float32).tocsr()
-					await queueOut.put( (True, [zStart,xStart,yStart], csrChains3D) )
+					await queueOut.put( (True, {"z": zStart, "x": xStart, "y": yStart}, csrChains3D) )
 
 			queueIn.task_done()
 		except:
@@ -193,11 +196,18 @@ def startComputeChainsCuda(imageHeight,imageWidth,imageDepth, imageDx,imageDy,im
 			computeChainsAsync(queueChainList, queueExtractedBorders, bordo3),
 			loop=loop))
 
-		resultsChains = [x for x in queueExtractedBorders.get_nowait()] 
+		try:
+			log(2, [ "Dumping chains..." ])
+			currResultChain = queueExtractedBorders.get_nowait()
+			while currResultChain[0] is True:
+				serializeChains(currResultChain[1], currResultChain[2], DIR_O)
+				currResultChain = queueExtractedBorders.get_nowait()
+		except:
+			pass
 
 		loop.close()
 
-		log(1, [ "Completed ", str(resultsChains)])
+		log(1, [ "Completed "])
 		returnValue = 0
 	except:
 		exc_type, exc_value, exc_traceback = sys.exc_info()
@@ -205,6 +215,19 @@ def startComputeChainsCuda(imageHeight,imageWidth,imageDepth, imageDx,imageDy,im
 		log(1, [ "Error: " + ''.join('!! ' + line for line in lines) ])  # Log it or whatever here
 
 	return returnValue
+
+def serializeChains(deltaCoords, chain, DIR_O):
+	ROWCOUNT = chain.shape[0]
+	COLCOUNT = chain.shape[1]
+	ROW = chain.indptr.tolist()
+	COL = chain.indices.tolist()
+	DATA = chain.data.tolist()
+
+	fileName = DIR_O + "/" + str(deltaCoords["z"]) + "-" + str(deltaCoords["y"]) + "-" + str(deltaCoords["x"]) + "-chain.json" 
+
+	with open(fileName, "w") as file:
+		json.dump({"DELTA":deltaCoords, "CHAIN": {"ROWCOUNT":ROWCOUNT, "COLCOUNT":COLCOUNT, "ROW":ROW, "COL":COL, "DATA":DATA }}, file, separators=(',',':'))
+		file.flush()
 
 def runComputation(imageDx,imageDy,imageDz, colors,coloridx, V,FV, INPUT_DIR,BEST_IMAGE,BORDER_FILE,DIR_O):
 	imageHeight,imageWidth = getImageData(INPUT_DIR+str(BEST_IMAGE)+PNG_EXTENSION)
