@@ -121,7 +121,7 @@ pycrypto==2.6.1
 pyculib==1.0.2+2.g7ae9662
 pycurl==7.43.0.1
 pyflakes==1.6.0
-Pygments==2.2.0
+Pygments==2.7.4
 pylint==1.8.4
 pyodbc==4.0.23
 pyopencl==2018.1.1
